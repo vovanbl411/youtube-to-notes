@@ -40,11 +40,13 @@ def test_invalid_url_returns_exit_code_2(capsys):
 
 def test_subtitles_path_skips_audio_and_whisper(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "OUTPUT_DIR", tmp_path / "output")
-    monkeypatch.setattr(cli, "fetch_metadata", lambda url: make_video(subtitles={"ru": FORMATS}))
+    monkeypatch.setattr(
+        cli, "fetch_metadata", lambda url, cookies_from_browser=None: make_video(subtitles={"ru": FORMATS})
+    )
     monkeypatch.setattr(cli, "download_audio", fail)
     monkeypatch.setattr(cli, "transcribe_audio", fail)
 
-    def fake_download_subtitles(url, track, dest_dir):
+    def fake_download_subtitles(url, track, dest_dir, cookies_from_browser=None):
         assert isinstance(track, SubtitleTrack)
         path = dest_dir / "subs.ru.json3"
         path.write_text(json.dumps(JSON3), encoding="utf-8")
@@ -67,10 +69,18 @@ def test_subtitles_path_skips_audio_and_whisper(tmp_path, monkeypatch):
 
 
 def test_whisper_fallback_used_without_subtitles(tmp_path, monkeypatch):
+    seen = {}
     monkeypatch.setattr(cli, "OUTPUT_DIR", tmp_path / "output")
-    monkeypatch.setattr(cli, "fetch_metadata", lambda url: make_video())
+    monkeypatch.setattr(
+        cli, "fetch_metadata", lambda url, cookies_from_browser=None: make_video()
+    )
     monkeypatch.setattr(cli, "download_subtitles", fail)
-    monkeypatch.setattr(cli, "download_audio", lambda url, dest_dir: dest_dir / "audio.m4a")
+
+    def fake_download_audio(url, dest_dir, cookies_from_browser=None):
+        seen["cookies"] = cookies_from_browser
+        return dest_dir / "audio.m4a"
+
+    monkeypatch.setattr(cli, "download_audio", fake_download_audio)
     monkeypatch.setattr(
         cli,
         "transcribe_audio",
@@ -78,19 +88,26 @@ def test_whisper_fallback_used_without_subtitles(tmp_path, monkeypatch):
     )
 
     assert cli.main([URL]) == 0
+    assert seen["cookies"] is None
     out_dir = tmp_path / "output" / "abc12345678"
     metadata = json.loads((out_dir / "metadata.json").read_text(encoding="utf-8"))
     assert metadata["transcript_source"] == "whisper"
     assert metadata["whisper_model"] == "small"
     assert metadata["language"] == "en"
     assert "## 00:00" in (out_dir / "transcript.md").read_text(encoding="utf-8")
+    assert cli.main([URL, "--force", "--cookies-from-browser", "firefox"]) == 0
+    assert seen["cookies"] == "firefox"
 
 
 def test_rerun_refuses_without_force(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(cli, "OUTPUT_DIR", tmp_path / "output")
-    monkeypatch.setattr(cli, "fetch_metadata", lambda url: make_video(subtitles={"ru": FORMATS}))
+    monkeypatch.setattr(
+        cli,
+        "fetch_metadata",
+        lambda url, cookies_from_browser=None: make_video(subtitles={"ru": FORMATS}),
+    )
 
-    def fake_download_subtitles(url, track, dest_dir):
+    def fake_download_subtitles(url, track, dest_dir, cookies_from_browser=None):
         path = dest_dir / "subs.ru.json3"
         path.write_text(json.dumps(JSON3), encoding="utf-8")
         return path, "json3"
@@ -105,8 +122,14 @@ def test_rerun_refuses_without_force(tmp_path, monkeypatch, capsys):
 
 def test_output_path_is_deterministic(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "OUTPUT_DIR", tmp_path / "output")
-    monkeypatch.setattr(cli, "fetch_metadata", lambda url: make_video())
-    monkeypatch.setattr(cli, "download_audio", lambda url, dest_dir: dest_dir / "audio.m4a")
+    monkeypatch.setattr(
+        cli, "fetch_metadata", lambda url, cookies_from_browser=None: make_video()
+    )
+    monkeypatch.setattr(
+        cli,
+        "download_audio",
+        lambda url, dest_dir, cookies_from_browser=None: dest_dir / "audio.m4a",
+    )
     monkeypatch.setattr(cli, "transcribe_audio", lambda audio_path, model: ([Fragment(0, 5, "x")], "en"))
 
     for _ in range(2):

@@ -9,7 +9,7 @@ description = "YouTube URL -> reproducible transcript (subtitles first, Whisper 
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "yt-dlp>=2026.1",
+    "yt-dlp[default]>=2026.1",
     "faster-whisper>=1.0",
     # faster-whisper 1.2.1 вызывает av.open(metadata_errors=...), удалённый в PyAV 19
     "av>=11,<19",

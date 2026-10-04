@@ -27,6 +27,9 @@ output/
 ## Requirements
 
 - Python >= 3.10
+- JavaScript runtime — актуальный YouTube-экстрактор yt-dlp (extra `default`) решает
+  JS-челленджи YouTube через внешний JS runtime; предпочтительный вариант — Deno
+  (исполняемый файл `deno` в `PATH`). Без него извлечение данных с YouTube может не работать.
 - Доступ в интернет (YouTube; при первом Whisper-запуске — модель ~0.5 ГБ с HuggingFace в `~/.cache`)
 - ffmpeg не требуется (аудио декодируется через PyAV внутри faster-whisper)
 
@@ -49,6 +52,16 @@ python3 -m venv .venv
 - `--model MODEL` — модель faster-whisper для fallback (по умолчанию `small`; для быстрых
   проверок `base`/`tiny`).
 - `--force` — перезаписать существующий `output/<video-id>/`.
+- `--cookies-from-browser BROWSER` — читать cookies указанного браузера (например,
+  `firefox`) для доступа к YouTube. Нужен, когда YouTube требует browser session и
+  отвечает ошибкой «Sign in to confirm you're not a bot». Это явный opt-in: без флага
+  приложение не читает cookies браузера.
+
+```bash
+.venv/bin/youtube-to-notes \
+  --cookies-from-browser firefox \
+  'https://www.youtube.com/watch?v=VIDEO_ID'
+```
 
 ## Формат output
 
@@ -151,7 +164,8 @@ Output детерминирован: всегда `output/<video-id>/` с фик
   времени (зависит от процессора).
 - Возрастные/приватные видео без cookies недоступны (ошибка yt-dlp передаётся как есть).
 - YouTube может блокировать запросы без cookies («Sign in to confirm you're not a bot») —
-  в зависимости от IP и конкретного видео; CLI пока не умеет передавать cookies.
+  в зависимости от IP и конкретного видео; в этом случае используйте
+  `--cookies-from-browser BROWSER` (например, `firefox`).
 - Дедупликация строк — по точному совпадению в скользящем окне из 8 строк; легитимно
   повторившаяся реплика внутри окна тоже будет отброшена.
 

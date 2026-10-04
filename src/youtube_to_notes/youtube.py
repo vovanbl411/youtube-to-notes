@@ -3,8 +3,10 @@
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from yt_dlp import YoutubeDL
+from yt_dlp.cookies import SUPPORTED_BROWSERS
 from yt_dlp.utils import DownloadError
 
 from . import YouTubeToNotesError
@@ -16,8 +18,28 @@ VIDEO_ID_RE = re.compile(
     r"([0-9A-Za-z_-]{11})(?![0-9A-Za-z_-])"
 )
 
+ALLOWED_HOSTS = frozenset(
+    {
+        "youtube.com",
+        "www.youtube.com",
+        "m.youtube.com",
+        "music.youtube.com",
+        "youtu.be",
+        "www.youtube-nocookie.com",  # официальный host /embed/ ссылок
+    }
+)
+
 
 def extract_video_id(url: str) -> str:
+    url = url.strip()
+    try:
+        host = urlsplit(url).hostname
+    except ValueError as exc:
+        raise YouTubeToNotesError(f"Некорректный URL: {url!r}") from exc
+    if (host or "").lower() not in ALLOWED_HOSTS:
+        raise YouTubeToNotesError(
+            f"Не YouTube URL: {url!r}. Ожидается ссылка на youtube.com или youtu.be"
+        )
     match = VIDEO_ID_RE.search(url)
     if not match:
         raise YouTubeToNotesError(
@@ -47,19 +69,31 @@ class SubtitleTrack:
     language: str  # базовый код языка, например "ru"
 
 
-def _ydl_opts(**extra):
-    return {
+def _ydl_opts(cookies_from_browser: str | None = None, **extra):
+    opts = {
         "quiet": True,
         "no_warnings": True,
         "noprogress": True,
         "noplaylist": True,
-        **extra,
     }
+    if cookies_from_browser:
+        opts["cookiesfrombrowser"] = _browser_cookie_spec(cookies_from_browser)
+    return {**opts, **extra}
 
 
-def fetch_metadata(url: str) -> Video:
+def _browser_cookie_spec(browser: str) -> tuple:
+    name = browser.strip().lower()
+    if name not in SUPPORTED_BROWSERS:
+        raise YouTubeToNotesError(
+            f"Неподдерживаемый браузер для --cookies-from-browser: {browser!r}. "
+            f"Поддерживаются: {', '.join(sorted(SUPPORTED_BROWSERS))}"
+        )
+    return (name, None, None, None)
+
+
+def fetch_metadata(url: str, cookies_from_browser: str | None = None) -> Video:
     try:
-        with YoutubeDL(_ydl_opts(skip_download=True)) as ydl:
+        with YoutubeDL(_ydl_opts(cookies_from_browser, skip_download=True)) as ydl:
             info = ydl.extract_info(url, download=False)
     except DownloadError as exc:
         raise YouTubeToNotesError(f"yt-dlp не смог получить данные видео: {exc}") from exc
@@ -107,12 +141,15 @@ def select_subtitle_track(video: Video) -> SubtitleTrack | None:
     return SubtitleTrack(kind, key, base)
 
 
-def download_subtitles(url: str, track: SubtitleTrack, dest_dir: Path) -> tuple[Path, str]:
+def download_subtitles(
+    url: str, track: SubtitleTrack, dest_dir: Path, cookies_from_browser: str | None = None
+) -> tuple[Path, str]:
     """Скачивает выбранный трек (формат json3, при отсутствии vtt).
 
     Возвращает (путь к файлу, формат "json3" | "vtt").
     """
     opts = _ydl_opts(
+        cookies_from_browser,
         skip_download=True,
         writesubtitles=track.kind == "manual",
         writeautomaticsub=track.kind == "auto",
@@ -132,8 +169,9 @@ def download_subtitles(url: str, track: SubtitleTrack, dest_dir: Path) -> tuple[
     return path, path.suffix.lstrip(".")
 
 
-def download_audio(url: str, dest_dir: Path) -> Path:
+def download_audio(url: str, dest_dir: Path, cookies_from_browser: str | None = None) -> Path:
     opts = _ydl_opts(
+        cookies_from_browser,
         format="bestaudio/best",
         outtmpl=str(dest_dir / "audio.%(ext)s"),
     )

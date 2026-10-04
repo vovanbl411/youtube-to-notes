@@ -45,6 +45,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Перезаписать существующий output/<video_id>/",
     )
+    parser.add_argument(
+        "--cookies-from-browser",
+        metavar="BROWSER",
+        default=None,
+        help="Читать cookies указанного браузера (напр. firefox) для доступа к YouTube; "
+        "явный opt-in, без флага cookies не читаются",
+    )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
 
@@ -57,17 +64,29 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     try:
-        process(args.url, video_id, model=args.model, force=args.force)
+        process(
+            args.url,
+            video_id,
+            model=args.model,
+            force=args.force,
+            cookies_from_browser=args.cookies_from_browser,
+        )
     except YouTubeToNotesError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     return 0
 
 
-def process(url: str, video_id: str, model: str = "small", force: bool = False) -> Path:
+def process(
+    url: str,
+    video_id: str,
+    model: str = "small",
+    force: bool = False,
+    cookies_from_browser: str | None = None,
+) -> Path:
     out_dir = OUTPUT_DIR / video_id
     _check_existing(out_dir, force)
-    video = fetch_metadata(url)
+    video = fetch_metadata(url, cookies_from_browser)
     _log(f"Видео: {video.title!r} — {video.channel}")
     track = select_subtitle_track(video)
     whisper_model = None
@@ -76,12 +95,12 @@ def process(url: str, video_id: str, model: str = "small", force: bool = False) 
         if track:
             source = SOURCE_BY_KIND[track.kind]
             language = track.language
-            sub_path, sub_format = download_subtitles(url, track, tmp_path)
+            sub_path, sub_format = download_subtitles(url, track, tmp_path, cookies_from_browser)
             fragments = _parse_subtitles(sub_path, sub_format)
             _log(f"Субтитры: {source} [{track.key}], {len(fragments)} фрагментов")
         else:
             _log("Подходящие субтитры не найдены — Whisper fallback")
-            audio_path = download_audio(url, tmp_path)
+            audio_path = download_audio(url, tmp_path, cookies_from_browser)
             fragments, language = transcribe_audio(audio_path, model)
             source = "whisper"
             whisper_model = model
