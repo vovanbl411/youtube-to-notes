@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "youtube-to-notes"
+version = "0.1.0"
+description = "YouTube URL -> reproducible transcript (subtitles first, Whisper fallback)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "yt-dlp>=2026.1",
+    "faster-whisper>=1.0",
+    # faster-whisper 1.2.1 вызывает av.open(metadata_errors=...), удалённый в PyAV 19
+    "av>=11,<19",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+youtube-to-notes = "youtube_to_notes.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
