@@ -7,9 +7,12 @@
 YouTube → transcript → digest request → structured digest → Obsidian proposal → human review
 ```
 
-Сейчас работают первые два шага цепочки: воспроизводимый transcript и self-contained
-digest request. Остальное — направление развития (см. «Что уже работает и куда
-идёт» ниже).
+`youtube-to-notes` автоматизирует первые два шага цепочки: воспроизводимый transcript
+и self-contained digest request. Дальше начинается внешний reasoning workflow:
+structured digest и Obsidian-aware proposal готовит ChatGPT / agent / human,
+финальное решение остаётся за человеком. Приложение намеренно не автоматизирует
+Obsidian integration и не изменяет vault (см. «Что автоматизировано и что остаётся
+внешним workflow» ниже).
 
 ## Quick start
 
@@ -87,20 +90,235 @@ self-contained: содержит инструкцию (task), digest contract v1
 воспроизводим. Существующий `digest-request.md` не перезаписывается молча — нужен
 явный `--force`.
 
-## Что уже работает и куда идёт
+## Пример полного workflow
 
-**Работает:**
+Предположим, нужно превратить YouTube-видео в полезные знания и затем аккуратно
+интегрировать их в существующий Obsidian vault.
 
-- YouTube URL → воспроизводимый transcript (subtitles first, Whisper fallback);
-- `digest-request.md` — self-contained задача на digest для человека, агента или LLM.
+### 1. Получить transcript
 
-**Куда идёт (ещё не реализовано):**
+```bash
+.venv/bin/youtube-to-notes 'https://www.youtube.com/watch?v=D3csT2KvOS4'
+```
 
-- `digest.md` — его создаёт исполнитель digest-request по контракту; автоматической
-  генерации внутри приложения нет;
-- chunking длинных transcript: digest-request сейчас всегда содержит полный
-  transcript;
-- Obsidian-aware proposal и human review — интеграции с vault нет.
+Результат:
+
+```text
+output/
+└── Подстановка данных из Secret в конфиги приложений.--D3csT2KvOS4/
+    ├── metadata.json
+    └── transcript.md
+```
+
+`youtube-to-notes` сначала пытается использовать доступные субтитры, а если их нет — скачивает аудио и запускает Whisper.
+
+---
+
+### 2. Подготовить запрос на structured digest
+
+```bash
+.venv/bin/youtube-to-notes --digest-request D3csT2KvOS4
+```
+
+Появится:
+
+```text
+output/
+└── Подстановка данных из Secret в конфиги приложений.--D3csT2KvOS4/
+    ├── metadata.json
+    ├── transcript.md
+    └── digest-request.md
+```
+
+`digest-request.md` — самодостаточный handoff artifact: в нём уже находятся metadata, transcript и контракт ожидаемого digest.
+
+Его можно передать ChatGPT, Codex/agent или обработать вручную.
+
+Результатом этого шага должен стать:
+
+```text
+digest.md
+```
+
+Например, вместо хронологического пересказа видео digest может выделить самостоятельные знания:
+
+```text
+- секреты не должны храниться открытым текстом в Git;
+- initContainer может подготовить конфигурацию до запуска приложения;
+- Secret можно передать только initContainer;
+- итоговый config можно положить в общий volume;
+- envsubst удобен для подстановки большого количества переменных;
+- значения Secret не следует выводить в логи.
+```
+
+При этом полезные фрагменты сохраняют timestamps и связь с исходным видео.
+
+---
+
+### 3. Использовать digest вместе с Obsidian
+
+`youtube-to-notes` намеренно не изменяет Obsidian автоматически.
+
+Следующий этап — reasoning workflow:
+
+```text
+digest.md
++
+существующий Obsidian vault
+        ↓
+Obsidian-aware proposal
+        ↓
+human review
+```
+
+Передайте `digest.md` агенту или ChatGPT с доступом к актуальному Obsidian repository.
+
+Например:
+
+```text
+Используй digest.md как источник новых знаний.
+
+Obsidian repository является source of truth для текущей структуры базы знаний.
+
+Сначала найди существующие тематические заметки, к которым относятся знания из digest.
+Не создавай структуру по источнику и не создавай отдельную заметку только потому,
+что материал получен с YouTube.
+
+Не изменяй vault.
+
+Подготовь proposal в формате:
+
+UPDATE
+- существующая заметка
+- какие знания стоит добавить
+- почему
+
+CREATE
+- новая тематическая заметка, только если подходящей существующей нет
+- предлагаемое расположение
+- почему нужна отдельная заметка
+
+LINK
+- полезные связи между существующими или предлагаемыми заметками
+
+SKIP
+- материал, который не стоит переносить в базу знаний
+
+Для важных knowledge fragments сохрани provenance и полезные timestamps исходного видео.
+```
+
+Для этого примера результат может выглядеть примерно так:
+
+```text
+UPDATE
+Knowledge Base/Containerization/Kubernetes/Secrets management.md
+
+Добавить:
+- pattern подготовки runtime-конфигурации из Secret;
+- секреты доступны initContainer, но не основному контейнеру;
+- не выводить значения Secret в stdout/logs.
+
+UPDATE
+Knowledge Base/Containerization/Kubernetes/Security Best Practices.md
+
+Менее приоритетно, чем Secrets management: знания частично пересекаются с уже
+добавляемыми.
+Добавить или связать:
+- initContainer;
+- shared emptyDir;
+- разделение privileges между init и main container.
+
+LINK
+Knowledge Base/Containerization/Kubernetes/ArgoCD/ArgoCD - продвинутые паттерны.md
+
+Причина:
+- Secret должен существовать до deployment;
+- deployment выполняется через GitOps/ArgoCD.
+
+SKIP
+- вступление автора;
+- повторения;
+- детали, не являющиеся самостоятельным знанием.
+```
+
+Это только proposal — никаких изменений в vault ещё не происходит.
+
+---
+
+### 4. Human review
+
+Человек проверяет:
+
+- правильно ли выбраны существующие заметки;
+- не создаётся ли лишняя новая заметка;
+- не дублируются ли уже существующие знания;
+- правильно ли сохранён смысл исходного материала;
+- нужны ли указанные timestamps и links.
+
+После approval агенту можно отдельно поручить применить **только одобренный proposal**.
+
+Затем изменения проверяются обычным Git workflow:
+
+```text
+proposal
+→ approved changes
+→ git diff / commit review
+→ validation
+→ merge
+```
+
+Таким образом ответственность разделена явно:
+
+```text
+youtube-to-notes
+    YouTube
+    → reliable transcript
+    → digest handoff
+
+ChatGPT / agent
+    digest
+    → knowledge integration proposal
+
+human
+    review
+    → final decision
+```
+
+YouTube остаётся источником и provenance, а структура базы знаний определяется темами самого Obsidian vault.
+
+## Что автоматизировано и что остаётся внешним workflow
+
+**Автоматизировано в `youtube-to-notes`:**
+
+```text
+YouTube
+→ metadata.json + transcript.md
+→ digest-request.md
+```
+
+- воспроизводимый transcript: subtitles first, Whisper fallback;
+- `digest-request.md` — self-contained digest handoff: metadata, полный transcript
+  и digest contract v1 в одном файле.
+
+**Внешний reasoning workflow — его выполняет ChatGPT / agent / human, а не
+приложение:**
+
+```text
+digest-request.md
+→ ChatGPT / agent / human
+→ digest.md
+
+digest.md + текущий Obsidian vault
+→ Obsidian-aware proposal
+→ human review
+```
+
+Автоматической Obsidian integration в приложении нет — намеренно:
+`youtube-to-notes` не изменяет vault.
+
+**Возможное будущее улучшение (не запланировано):** chunking длинных transcript —
+сейчас digest-request всегда содержит полный transcript. Усложнение оправдано
+только если появится evidence, что текущий подход создаёт реальную проблему.
 
 Сторонней инфраструктуры тоже нет: LLM API и ключей, batch processing,
 daemon/watch mode, web UI, Docker, баз данных и очередей.
