@@ -49,6 +49,8 @@ python3 -m venv .venv
 
 Опции:
 
+- `--digest-request VIDEO_ID` — собрать `output/<VIDEO_ID>/digest-request.md` из уже
+  существующих `metadata.json` и `transcript.md` (см. ниже).
 - `--model MODEL` — модель faster-whisper для fallback (по умолчанию `small`; для быстрых
   проверок `base`/`tiny`).
 - `--force` — перезаписать существующий `output/<video-id>/`.
@@ -108,6 +110,30 @@ transcript_source: manual_subtitles
 
 Следующий фрагмент.
 ```
+
+## digest-request.md (Milestone 2A)
+
+Для видео, transcript которого уже получен, можно собрать handoff-задачу для создания
+structured digest:
+
+```bash
+.venv/bin/youtube-to-notes --digest-request VIDEO_ID
+```
+
+Создаёт `output/<video-id>/digest-request.md` из локальных `metadata.json` и
+`transcript.md`: без сети, без повторного извлечения данных с YouTube и без Whisper.
+Файл полностью self-contained: содержит инструкцию (task), digest contract v1
+(структуру будущего `digest.md`), source metadata и полный transcript — его можно
+как есть передать человеку, агенту/Codex или загрузить в ChatGPT UI, ничего больше
+не прикладывая.
+
+Генерация детерминирована: при одинаковых входных файлах результат байт-в-байт
+воспроизводим. Существующий `digest-request.md` не перезаписывается молча — как и в
+transcript pipeline, нужен явный `--force`.
+
+Ограничения: автоматической генерации `digest.md` внутри приложения нет — итоговый
+digest создаёт исполнитель запроса по контракту; chunking длинных transcript пока не
+реализован (request всегда содержит полный transcript).
 
 ## Pipeline: subtitles first
 

@@ -1,4 +1,4 @@
-"""CLI: YouTube URL -> output/<video_id>/{metadata.json, transcript.md}."""
+"""CLI: YouTube URL -> output/<video_id>/{metadata.json, transcript.md, digest-request.md}."""
 
 import argparse
 import json
@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 
 from . import YouTubeToNotesError, __version__
+from .digest import render_digest_request_md
 from .transcript import (
     Fragment,
     fragments_from_json3,
@@ -34,7 +35,18 @@ def build_parser() -> argparse.ArgumentParser:
         prog="youtube-to-notes",
         description="Получить воспроизводимый transcript из YouTube URL (subtitles first).",
     )
-    parser.add_argument("url", help="YouTube URL видео")
+    parser.add_argument(
+        "url",
+        nargs="?",
+        help="YouTube URL видео (не используется с --digest-request)",
+    )
+    parser.add_argument(
+        "--digest-request",
+        metavar="VIDEO_ID",
+        default=None,
+        help="Собрать output/<VIDEO_ID>/digest-request.md из существующих "
+        "metadata.json и transcript.md (локально, без сети)",
+    )
     parser.add_argument(
         "--model",
         default="small",
@@ -57,7 +69,19 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.digest_request is not None:
+        if args.url:
+            parser.error("--digest-request работает с существующим output и не сочетается с URL")
+        try:
+            run_digest_request(args.digest_request, force=args.force)
+        except YouTubeToNotesError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        return 0
+    if not args.url:
+        parser.error("требуется URL видео (или --digest-request VIDEO_ID)")
     try:
         video_id = extract_video_id(args.url)
     except YouTubeToNotesError as exc:
@@ -117,6 +141,32 @@ def process(
     )
     _log(f"Готово: {out_dir} — {len(sections)} секций, источник {source}")
     return out_dir
+
+
+def run_digest_request(video_id: str, force: bool = False) -> Path:
+    """Собирает digest-request.md из существующего output/<video_id>/ (Milestone 2A)."""
+    out_dir = OUTPUT_DIR / video_id
+    metadata_path = out_dir / "metadata.json"
+    transcript_path = out_dir / "transcript.md"
+    missing = [p.name for p in (metadata_path, transcript_path) if not p.exists()]
+    if missing:
+        raise YouTubeToNotesError(
+            f"Нет исходных файлов ({', '.join(missing)}) в {out_dir}. "
+            "Сначала запустите transcript pipeline для этого видео."
+        )
+    request_path = out_dir / "digest-request.md"
+    if request_path.exists() and not force:
+        raise YouTubeToNotesError(
+            f"Output уже существует: {request_path}. Используйте --force для перезаписи."
+        )
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise YouTubeToNotesError(f"Некорректный metadata.json в {out_dir}: {exc}") from exc
+    transcript_md = transcript_path.read_text(encoding="utf-8")
+    request_path.write_text(render_digest_request_md(metadata, transcript_md), encoding="utf-8")
+    _log(f"Готово: {request_path}")
+    return request_path
 
 
 def _parse_subtitles(path: Path, sub_format: str) -> list[Fragment]:
