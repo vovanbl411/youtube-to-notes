@@ -13,9 +13,11 @@ from . import YouTubeToNotesError
 
 PREFERRED_LANGUAGES = ("ru", "en")
 
+VIDEO_ID_CHARS = r"[0-9A-Za-z_-]{11}"
+
 VIDEO_ID_RE = re.compile(
     r"(?:[?&]v=|youtu\.be/|/shorts/|/embed/|/live/|/v/)"
-    r"([0-9A-Za-z_-]{11})(?![0-9A-Za-z_-])"
+    rf"({VIDEO_ID_CHARS})(?![0-9A-Za-z_-])"
 )
 
 ALLOWED_HOSTS = frozenset(
@@ -47,6 +49,14 @@ def extract_video_id(url: str) -> str:
             "'https://www.youtube.com/watch?v=VIDEO_ID' или 'https://youtu.be/VIDEO_ID'"
         )
     return match.group(1)
+
+
+def validate_video_id(video_id: str) -> None:
+    """Проверяет standalone video ID (для локальных операций над output/<video_id>/)."""
+    if not re.fullmatch(VIDEO_ID_CHARS, video_id):
+        raise YouTubeToNotesError(
+            f"Некорректный video ID: {video_id!r}. Ожидается 11 символов [0-9A-Za-z_-]."
+        )
 
 
 @dataclass

@@ -24,6 +24,7 @@ from .youtube import (
     extract_video_id,
     fetch_metadata,
     select_subtitle_track,
+    validate_video_id,
 )
 
 OUTPUT_DIR = Path("output")
@@ -145,6 +146,7 @@ def process(
 
 def run_digest_request(video_id: str, force: bool = False) -> Path:
     """Собирает digest-request.md из существующего output/<video_id>/ (Milestone 2A)."""
+    validate_video_id(video_id)
     out_dir = OUTPUT_DIR / video_id
     metadata_path = out_dir / "metadata.json"
     transcript_path = out_dir / "transcript.md"

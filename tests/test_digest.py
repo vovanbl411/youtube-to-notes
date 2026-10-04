@@ -176,3 +176,23 @@ def test_null_metadata_fields_rendered_as_null():
     assert "- Upload date: null" in request
     assert "- Duration: null" in request
     assert "Whisper model" not in request
+
+
+@pytest.mark.parametrize("bad_id", ["../../foo", "abc", "youtube.com"])
+def test_digest_request_rejects_non_video_id(tmp_path, monkeypatch, capsys, bad_id):
+    monkeypatch.setattr(cli, "OUTPUT_DIR", tmp_path / "output")
+    (tmp_path / "output").mkdir()
+
+    assert cli.main(["--digest-request", bad_id]) == 1
+    assert "Некорректный video ID" in capsys.readouterr().err
+    assert list((tmp_path / "output").iterdir()) == []
+
+
+def test_digest_request_accepts_real_video_id(tmp_path, monkeypatch):
+    metadata = {**METADATA, "video_id": "D3csT2KvOS4"}
+    out_dir = make_output(tmp_path, metadata)
+    monkeypatch.setattr(cli, "OUTPUT_DIR", tmp_path / "output")
+    patch_offline(monkeypatch)
+
+    assert cli.main(["--digest-request", "D3csT2KvOS4"]) == 0
+    assert (out_dir / "digest-request.md").exists()
