@@ -118,8 +118,7 @@ def output_dir_name(title: str, video_id: str) -> str:
     return f"{sanitize_title(title)}--{video_id}"
 
 
-def find_output_dir(video_id: str) -> Path:
-    """Ищет существующий output по metadata.json (не по имени каталога)."""
+def _matching_output_dirs(video_id: str) -> list[Path]:
     matches = []
     if OUTPUT_DIR.is_dir():
         for child in sorted(OUTPUT_DIR.iterdir()):
@@ -132,17 +131,27 @@ def find_output_dir(video_id: str) -> Path:
                 continue
             if isinstance(metadata, dict) and metadata.get("video_id") == video_id:
                 matches.append(child)
+    return matches
+
+
+def _ambiguous_outputs_error(video_id: str, matches: list[Path]) -> YouTubeToNotesError:
+    return YouTubeToNotesError(
+        f"Найдено несколько output для video ID {video_id!r}: "
+        f"{', '.join(str(m) for m in matches)}. "
+        "Устраните дубликаты, чтобы избежать выбора неправильного каталога."
+    )
+
+
+def find_output_dir(video_id: str) -> Path:
+    """Ищет существующий output по metadata.json (не по имени каталога)."""
+    matches = _matching_output_dirs(video_id)
+    if len(matches) > 1:
+        raise _ambiguous_outputs_error(video_id, matches)
     if not matches:
         raise YouTubeToNotesError(
             f"Output для video ID {video_id!r} не найден в {OUTPUT_DIR}: "
             "нет каталога с metadata.json, где video_id совпадает. "
             "Сначала запустите transcript pipeline для этого видео."
-        )
-    if len(matches) > 1:
-        raise YouTubeToNotesError(
-            f"Найдено несколько output для video ID {video_id!r}: "
-            f"{', '.join(str(m) for m in matches)}. "
-            "Устраните дубликаты, чтобы избежать выбора неправильного каталога."
         )
     return matches[0]
 
@@ -156,7 +165,12 @@ def process(
 ) -> Path:
     video = fetch_metadata(url, cookies_from_browser)
     _log(f"Видео: {video.title!r} — {video.channel}")
-    out_dir = OUTPUT_DIR / output_dir_name(video.title, video_id)
+    # video_id — identity: существующий output переиспользуется как есть (даже legacy
+    # или со старым title), без rename; нового каталога рядом не создаётся.
+    existing = _matching_output_dirs(video_id)
+    if len(existing) > 1:
+        raise _ambiguous_outputs_error(video_id, existing)
+    out_dir = existing[0] if existing else OUTPUT_DIR / output_dir_name(video.title, video_id)
     _check_existing(out_dir, force)
     track = select_subtitle_track(video)
     whisper_model = None
