@@ -142,12 +142,24 @@ def test_refuses_to_overwrite_without_force(tmp_path, monkeypatch, capsys):
 def test_missing_transcript_output_fails(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(cli, "OUTPUT_DIR", tmp_path / "output")
     patch_offline(monkeypatch)
-    (tmp_path / "output" / "abc12345678").mkdir(parents=True)
+    out_dir = tmp_path / "output" / "abc12345678"
+    out_dir.mkdir(parents=True)
+    (out_dir / "metadata.json").write_text(json.dumps(METADATA), encoding="utf-8")
 
     assert cli.main(["--digest-request", "abc12345678"]) == 1
     err = capsys.readouterr().err
-    assert "metadata.json" in err and "transcript.md" in err
-    assert not (tmp_path / "output" / "abc12345678" / "digest-request.md").exists()
+    assert "Нет transcript.md" in err
+    assert not (out_dir / "digest-request.md").exists()
+
+
+def test_unknown_video_id_fails(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cli, "OUTPUT_DIR", tmp_path / "output")
+    patch_offline(monkeypatch)
+    (tmp_path / "output").mkdir()
+
+    assert cli.main(["--digest-request", "abc12345678"]) == 1
+    err = capsys.readouterr().err
+    assert "не найден" in err and "abc12345678" in err
 
 
 def test_no_network_or_llm_calls(tmp_path, monkeypatch):

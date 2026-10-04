@@ -1,9 +1,10 @@
-"""CLI: YouTube URL -> output/<video_id>/{metadata.json, transcript.md, digest-request.md}."""
+"""CLI: YouTube URL -> output/<sanitized-title>--<video_id>/{metadata.json, transcript.md, digest-request.md}."""
 
 import argparse
 import json
 import sys
 import tempfile
+import unicodedata
 from pathlib import Path
 
 from . import YouTubeToNotesError, __version__
@@ -29,6 +30,8 @@ from .youtube import (
 
 OUTPUT_DIR = Path("output")
 SOURCE_BY_KIND = {"manual": "manual_subtitles", "auto": "automatic_subtitles"}
+TITLE_MAX_CHARS = 100
+TITLE_FALLBACK = "video"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -45,8 +48,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--digest-request",
         metavar="VIDEO_ID",
         default=None,
-        help="Собрать output/<VIDEO_ID>/digest-request.md из существующих "
-        "metadata.json и transcript.md (локально, без сети)",
+        help="Собрать digest-request.md из существующего output этого видео "
+        "(каталог находится по metadata.json; локально, без сети)",
     )
     parser.add_argument(
         "--model",
@@ -56,7 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Перезаписать существующий output/<video_id>/",
+        help="Перезаписать существующий output каталог",
     )
     parser.add_argument(
         "--cookies-from-browser",
@@ -102,6 +105,48 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def sanitize_title(title: str) -> str:
+    """Готовит title к роли component имени каталога: читаемо, deterministic, без path-опасных символов."""
+    cleaned = "".join(ch for ch in title if unicodedata.category(ch)[0] != "C")
+    cleaned = cleaned.replace("/", "-").replace("\\", "-")
+    cleaned = " ".join(cleaned.split())
+    cleaned = cleaned[:TITLE_MAX_CHARS].rstrip()
+    return cleaned or TITLE_FALLBACK
+
+
+def output_dir_name(title: str, video_id: str) -> str:
+    return f"{sanitize_title(title)}--{video_id}"
+
+
+def find_output_dir(video_id: str) -> Path:
+    """Ищет существующий output по metadata.json (не по имени каталога)."""
+    matches = []
+    if OUTPUT_DIR.is_dir():
+        for child in sorted(OUTPUT_DIR.iterdir()):
+            metadata_path = child / "metadata.json"
+            if not child.is_dir() or not metadata_path.is_file():
+                continue
+            try:
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(metadata, dict) and metadata.get("video_id") == video_id:
+                matches.append(child)
+    if not matches:
+        raise YouTubeToNotesError(
+            f"Output для video ID {video_id!r} не найден в {OUTPUT_DIR}: "
+            "нет каталога с metadata.json, где video_id совпадает. "
+            "Сначала запустите transcript pipeline для этого видео."
+        )
+    if len(matches) > 1:
+        raise YouTubeToNotesError(
+            f"Найдено несколько output для video ID {video_id!r}: "
+            f"{', '.join(str(m) for m in matches)}. "
+            "Устраните дубликаты, чтобы избежать выбора неправильного каталога."
+        )
+    return matches[0]
+
+
 def process(
     url: str,
     video_id: str,
@@ -109,10 +154,10 @@ def process(
     force: bool = False,
     cookies_from_browser: str | None = None,
 ) -> Path:
-    out_dir = OUTPUT_DIR / video_id
-    _check_existing(out_dir, force)
     video = fetch_metadata(url, cookies_from_browser)
     _log(f"Видео: {video.title!r} — {video.channel}")
+    out_dir = OUTPUT_DIR / output_dir_name(video.title, video_id)
+    _check_existing(out_dir, force)
     track = select_subtitle_track(video)
     whisper_model = None
     with tempfile.TemporaryDirectory(prefix="youtube-to-notes-") as tmp:
@@ -145,24 +190,19 @@ def process(
 
 
 def run_digest_request(video_id: str, force: bool = False) -> Path:
-    """Собирает digest-request.md из существующего output/<video_id>/ (Milestone 2A)."""
+    """Собирает digest-request.md из существующего output (Milestone 2A)."""
     validate_video_id(video_id)
-    out_dir = OUTPUT_DIR / video_id
-    metadata_path = out_dir / "metadata.json"
+    out_dir = find_output_dir(video_id)
     transcript_path = out_dir / "transcript.md"
-    missing = [p.name for p in (metadata_path, transcript_path) if not p.exists()]
-    if missing:
-        raise YouTubeToNotesError(
-            f"Нет исходных файлов ({', '.join(missing)}) в {out_dir}. "
-            "Сначала запустите transcript pipeline для этого видео."
-        )
+    if not transcript_path.exists():
+        raise YouTubeToNotesError(f"Нет transcript.md в {out_dir}.")
     request_path = out_dir / "digest-request.md"
     if request_path.exists() and not force:
         raise YouTubeToNotesError(
             f"Output уже существует: {request_path}. Используйте --force для перезаписи."
         )
     try:
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        metadata = json.loads((out_dir / "metadata.json").read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise YouTubeToNotesError(f"Некорректный metadata.json в {out_dir}: {exc}") from exc
     transcript_md = transcript_path.read_text(encoding="utf-8")

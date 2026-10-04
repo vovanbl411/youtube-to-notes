@@ -10,10 +10,18 @@ youtube-to-notes 'https://www.youtube.com/watch?v=VIDEO_ID'
 
 ```text
 output/
-└── VIDEO_ID/
+└── SANITIZED-TITLE--VIDEO_ID/
     ├── metadata.json
     └── transcript.md
 ```
+
+Имя каталога человекочитаемо: `<sanitized-title>--<video-id>` (например,
+`output/Подстановка данных из Secret в конфиги приложений.--D3csT2KvOS4/`). Title
+очищается минимально — `/` и `\` заменяются на `-`, control-символы удаляются,
+повторяющиеся пробелы схлопываются, длина ограничена 100 символами; Unicode и
+пунктуация сохраняются. `video_id` остаётся identity/provenance. Каталоги
+`output/<video-id>/` из старых версий остаются совместимыми и не переименовываются
+автоматически.
 
 Дальнейшая цель проекта (knowledge extraction, Obsidian) — вне рамок текущего MVP.
 
@@ -49,8 +57,9 @@ python3 -m venv .venv
 
 Опции:
 
-- `--digest-request VIDEO_ID` — собрать `output/<VIDEO_ID>/digest-request.md` из уже
-  существующих `metadata.json` и `transcript.md` (см. ниже).
+- `--digest-request VIDEO_ID` — собрать `digest-request.md` из уже существующих
+  `metadata.json` и `transcript.md` этого видео; каталог находится автоматически по
+  `metadata.json` (включая старые `output/<video-id>/`). См. ниже.
 - `--model MODEL` — модель faster-whisper для fallback (по умолчанию `small`; для быстрых
   проверок `base`/`tiny`).
 - `--force` — перезаписать существующий `output/<video-id>/`.
@@ -120,8 +129,13 @@ structured digest:
 .venv/bin/youtube-to-notes --digest-request VIDEO_ID
 ```
 
-Создаёт `output/<video-id>/digest-request.md` из локальных `metadata.json` и
-`transcript.md`: без сети, без повторного извлечения данных с YouTube и без Whisper.
+Создаёт `digest-request.md` внутри существующего output-каталога видео (независимо от
+того, назван ли он по новому контракту или по-старому — `output/<video-id>/`):
+соответствующий каталог ищется по `video_id` в `metadata.json` непосредственных
+подкаталогов `output/`, а не по имени каталога. Если подходящий output один — из его
+локальных `metadata.json` и `transcript.md` собирается запрос: без сети, без
+повторного извлечения данных с YouTube и без Whisper. Если подходящих каталогов
+несколько (после ручных rename/copy) — CLI отказывается выбирать и перечисляет их.
 Файл полностью self-contained: содержит инструкцию (task), digest contract v1
 (структуру будущего `digest.md`), source metadata и полный transcript — его можно
 как есть передать человеку, агенту/Codex или загрузить в ChatGPT UI, ничего больше
@@ -176,9 +190,10 @@ inline-теги и стили, позиционирование, HTML-entities, 
 
 ## Повторный запуск
 
-Output детерминирован: всегда `output/<video-id>/` с фиксированными именами файлов,
-никаких случайных имён. Если `metadata.json` или `transcript.md` уже существуют,
-запуск завершается ошибкой (защита от потери ручных правок); `--force` перезаписывает.
+Output детерминирован: всегда `output/<sanitized-title>--<video-id>/` с фиксированными
+именами файлов, никаких случайных имён. Если `metadata.json` или `transcript.md` уже
+существуют, запуск завершается ошибкой (защита от потери ручных правок); `--force`
+перезаписывает.
 
 ## Текущие ограничения
 

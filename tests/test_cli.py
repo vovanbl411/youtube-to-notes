@@ -55,7 +55,7 @@ def test_subtitles_path_skips_audio_and_whisper(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "download_subtitles", fake_download_subtitles)
 
     assert cli.main([URL]) == 0
-    out_dir = tmp_path / "output" / "abc12345678"
+    out_dir = tmp_path / "output" / "Test--abc12345678"
     metadata = json.loads((out_dir / "metadata.json").read_text(encoding="utf-8"))
     assert metadata["transcript_source"] == "manual_subtitles"
     assert metadata["language"] == "ru"
@@ -89,7 +89,7 @@ def test_whisper_fallback_used_without_subtitles(tmp_path, monkeypatch):
 
     assert cli.main([URL]) == 0
     assert seen["cookies"] is None
-    out_dir = tmp_path / "output" / "abc12345678"
+    out_dir = tmp_path / "output" / "Test--abc12345678"
     metadata = json.loads((out_dir / "metadata.json").read_text(encoding="utf-8"))
     assert metadata["transcript_source"] == "whisper"
     assert metadata["whisper_model"] == "small"
@@ -135,4 +135,4 @@ def test_output_path_is_deterministic(tmp_path, monkeypatch):
     for _ in range(2):
         assert cli.main([URL, "--force"]) == 0
     dirs = [d.name for d in (tmp_path / "output").iterdir()]
-    assert dirs == ["abc12345678"]
+    assert dirs == ["Test--abc12345678"]
